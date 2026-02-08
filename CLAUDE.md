@@ -28,42 +28,94 @@ These are non-negotiable design decisions. Do not deviate from them:
    - `Ctrl+/` toggle comment
    - `Alt+↑/↓` move line up/down
    - `` Ctrl+` `` toggle terminal
-   - `Ctrl+L` open LLM agent panel
+   - `Ctrl+L` toggle agent pane
    - `Tab` accept LLM suggestion
 
 4. **Zero config.** Opening a project directory should just work — language detection, syntax highlighting, git integration, LSP autostart. No config files required for basic usage.
 
 5. **Built for the masses.** This is not for terminal power users. It's for the 50M+ developers who use VSCode/JetBrains and are being pulled into the terminal by LLM coding agents. Every UX decision should ask: "Would a VSCode user feel at home?"
 
-6. **LLM agents are first-class IDE participants.** The IDE exposes its primitives (debugger, diff viewer, git, test runner, LSP diagnostics) as tools that LLM agents can invoke via the IDE Toolbox Protocol (MCP-compatible). The LLM doesn't just read files — it can set breakpoints, inspect variables, stage hunks, run tests.
+6. **LLM agents are first-class IDE participants.** The IDE exposes its primitives (debugger, diff viewer, git, test runner, LSP diagnostics) as tools that LLM agents can invoke via the IDE Toolbox Protocol (MCP server on localhost). The LLM doesn't just read files — it can set breakpoints, inspect variables, stage hunks, run tests.
+
+7. **We don't own the AI — we make the IDE legible to any AI.** Oxide does NOT bundle an LLM. It does NOT compete with Claude Code, OpenCode, or Aider. It exposes an MCP server that any agent connects to. The agent runs in its own process; Oxide gives it eyes and hands inside the IDE.
+
+8. **Oxide is the single pane of glass.** The developer never leaves Oxide to interact with their AI agent. Agents run inside Oxide (via tmux-managed panes) and connect to the IDE via MCP on localhost. Editor, file tree, agent terminal — one window, shared state, no tmux tab switching, no alt-tabbing.
 
 ## Architecture Overview
 
 ```
+┌─ tmux session (invisible to user) ──────────────────────┐
+│                                                          │
+│  ┌─ Oxide TUI (tmux pane 1) ─────────────────────────┐  │
+│  │                                                    │  │
+│  │  ┌─────────┬──────────────────────┐                │  │
+│  │  │  File   │      Editor          │                │  │
+│  │  │  Tree   │                      │                │  │
+│  │  │         │  [diffs, highlights, │                │  │
+│  │  │         │   breakpoints]       │                │  │
+│  │  └─────────┴──────────────────────┘                │  │
+│  │  Status Bar               MCP: localhost:4322 ●    │  │
+│  └────────────────────────────────────────────────────┘  │
+│                         ↕ MCP                            │
+│  ┌─ Agent pane (tmux pane 2, toggle Ctrl+L) ──────────┐  │
+│  │  $ claude                                          │  │
+│  │  Claude> I'll fix that type error...               │  │
+│  │  [calls ide.diagnostics.list()]                    │  │
+│  │  [calls ide.editor.replaceRange()]                 │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+
+Underlying architecture:
 ┌─────────────────────────────────────────────┐
-│              TUI Frontend                    │
-│           (ratatui + crossterm)              │
-├─────────────────────────────────────────────┤
-│           IDE Toolbox Protocol               │
-│          (MCP-compatible tools)              │
-├─────────────────────────────────────────────┤
-│             Core Services                    │
+│             Oxide Core (Rust)                │
 │   LSP · DAP · Tree-sitter · Git · Keymap    │
-├─────────────────────────────────────────────┤
-│          Extension Host Bridge               │
-│     (Rust ↔ Node.js via JSON-RPC IPC)       │
-└─────────────────────────────────────────────┘
+├──────────────┬──────────────────────────────┤
+│  Extension   │   MCP Server                  │
+│  Host Bridge │   localhost:4322              │
+│  (Node.js)   │   ↕ tools    ↕ events (SSE)  │
+└──────────────┴──────────────────────────────┘
 ```
+
+### IDE as Server
+
+Oxide core is the source of truth for all IDE state. Two types of clients consume it:
+
+1. **The TUI** — renders state for the human
+2. **LLM agents** — read and mutate state via MCP
+
+Both operate on the same underlying state. Agent calls `ide.editor.goToLine(file, 42)` → cursor moves in TUI in real time. Human clicks gutter to set breakpoint → agent sees it via `ide.debug.listBreakpoints()`. Same workspace, same session, same truth.
 
 ### Process Model
 
-Oxide runs as TWO processes:
+Oxide runs as TWO+ processes:
 
-1. **Main process (Rust):** TUI rendering, editor core, LSP/DAP management, git, IDE Toolbox Protocol, keymap engine, config engine, all core logic.
+1. **Main process (Rust):** TUI rendering, editor core, LSP/DAP management, git, MCP server (localhost:4322), keymap engine, config engine, all core logic.
 
 2. **Extension host (Node.js):** Separate process. Runs VSCode-compatible extensions. Communicates with main process via JSON-RPC over Unix domain sockets (named pipes on Windows). Extensions import a JS-side shim that implements the `vscode.*` API and proxies calls over IPC to the Rust process.
 
-A misbehaving extension CANNOT crash the IDE. This isolation is by design.
+3. **LLM agents (external):** NOT managed by Oxide. Claude Code, OpenCode, Aider, or any MCP client connects to the MCP server on localhost:4322. Agent disconnecting does NOT affect the IDE. Process isolation at every boundary.
+
+A misbehaving extension or disconnecting agent CANNOT crash the IDE. This isolation is by design.
+
+### Tmux as Infrastructure Layer
+
+Oxide uses tmux as its process and pane management layer. Tmux is a **dependency** — it ships with or is required by the Oxide distribution. The user never interacts with tmux directly. Oxide programmatically controls tmux sessions, windows, and panes via `tmux` CLI commands. The user experiences one unified UI; tmux is invisible plumbing.
+
+Why tmux:
+- Battle-tested PTY handling — we don't build a terminal emulator
+- Real pane management for embedding agent CLIs alongside the IDE
+- Session persistence — agent keeps running if you detach/reattach
+- Available everywhere on macOS and Linux. Windows requires WSL (acceptable for Phase 1)
+
+Implementation rules:
+- Oxide starts a tmux session with a custom config (no user `.tmux.conf` interference)
+- Tmux prefix key is rebound or disabled — Oxide owns all keybindings
+- The user never sees tmux chrome, status bar, or key hints
+- All tmux interaction happens via Oxide's own commands (`Ctrl+L` to toggle agent pane, etc.)
+- If tmux is not installed, Oxide runs in IDE-only mode and tells the user to install tmux for agent integration
+
+Note: zellij (Rust-native) is an alternative to evaluate later, but tmux has ubiquitous install base and is the right choice for now.
 
 ### Editor Core
 
@@ -103,17 +155,52 @@ The extension host is a separate Node.js process that provides VSCode extension 
 
 ### IDE Toolbox Protocol
 
-MCP-compatible tool interface exposing IDE primitives to LLM agents:
+Oxide runs an MCP server on `localhost:4322` (HTTP + SSE transport). This is how LLM agents interact with the IDE. The server starts automatically with Oxide — no opt-in, no auth (localhost-only).
 
+Claude Code users connect by adding to `.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "oxide": {
+      "url": "http://localhost:4322/mcp"
+    }
+  }
+}
+```
+
+Why HTTP on localhost instead of Unix sockets for agents:
+- Cross-platform (Windows has no Unix sockets)
+- Any HTTP client can connect (curl for debugging, browser for future web UI)
+- SSE provides real-time event streaming (diagnostics changes, test results)
+- MCP spec supports HTTP+SSE natively
+- Unix sockets still used internally for extension host IPC (Rust↔Node.js)
+
+**Phase 1 tool surface (minimum viable — 8 tools):**
 ```
 ide.editor.getOpenFile()
+ide.editor.getOpenFiles()
+ide.editor.getContent(file, startLine?, endLine?)
+ide.editor.goToLine(file, line)
+ide.editor.replaceRange(file, startLine, endLine, newText)
+ide.diagnostics.list(file?)
+ide.symbols.search(query)
+ide.file.list(directory?)
+```
+
+**Full tool schema (Phase 2+):**
+```
+ide.editor.getOpenFile()
+ide.editor.getOpenFiles()
+ide.editor.getContent(file, startLine?, endLine?)
 ide.editor.goToLine(file, line)
 ide.editor.getSelection()
+ide.editor.replaceRange(file, startLine, endLine, newText)
 ide.editor.insertText(text, position)
 ide.diff.show(before, after)
 ide.diff.stageHunk(file, hunkIndex)
 ide.debug.setBreakpoint(file, line)
 ide.debug.removeBreakpoint(id)
+ide.debug.listBreakpoints()
 ide.debug.inspectVariable(name)
 ide.debug.stepOver()
 ide.debug.stepInto()
@@ -128,10 +215,87 @@ ide.git.diff(file?)
 ide.git.commit(message)
 ide.terminal.run(command)
 ide.search.find(query, scope)
+ide.symbols.search(query)
+ide.file.list(directory?)
 ide.diagnostics.list(file?)
 ```
 
-The LLM agent and VSCode extensions communicate over the same message protocol. The LLM is essentially another extension with broader tool access.
+### Agent Actions Render Natively
+
+When an agent performs an action via MCP, Oxide renders the action visually in the editor, the same way a human action would appear.
+
+- `ide.editor.replaceRange()` → Editor highlights the changed region. (Phase 2: inline diff view with accept/reject controls.)
+- `ide.editor.goToLine()` → Cursor moves, viewport scrolls, line is briefly highlighted.
+- `ide.debug.setBreakpoint()` → Gutter breakpoint indicator appears in real time.
+- `ide.diagnostics.list()` → No visual change (read-only), but if the agent then acts on diagnostics, the fix is shown as a diff.
+- `ide.test.run()` → Test results panel opens or updates with results (Phase 2).
+- `ide.git.stageFile()` → Git status in status bar updates, file tree marker changes (Phase 2).
+
+The principle: **the IDE is the visual feedback layer for agent actions.** The agent operates through MCP. Oxide renders what the agent did. The developer sees everything happening in the editor — not in the agent's terminal output.
+
+### Bidirectional Communication
+
+**Agent → IDE (via MCP tools):** Agent calls tools, IDE state changes, TUI renders the effect.
+
+**IDE → Agent (via MCP notifications/events):** When the developer acts in the IDE, the MCP server emits SSE events that the agent can subscribe to. The agent has real-time awareness of what the developer is doing.
+
+Examples:
+- Developer opens a file → agent receives `ide.event.fileOpened`
+- Developer selects code and hits "send to agent" → selected code is sent to the agent's input
+- Developer gets a new LSP diagnostic → agent receives `ide.event.diagnosticChanged`
+- Developer places cursor on a function → agent receives `ide.event.cursorMoved`
+
+Phase 1 scope: agent→IDE only (tool calls). IDE→agent events are Phase 2 — they require careful design around what events to emit (too noisy = agent gets confused, too sparse = agent lacks context).
+
+## Two-Mode UX Model
+
+Oxide has two primary modes the user can toggle between:
+
+### Mode 1: IDE Only (default on launch)
+
+```
+┌──────────────────────────────────────────┐
+│ Tabs                                     │
+├────────┬─────────────────────────────────┤
+│        │                                 │
+│  File  │         Editor                  │
+│  Tree  │                                 │
+│        │                                 │
+│        │                                 │
+├────────┴─────────────────────────────────┤
+│ Status Bar                               │
+└──────────────────────────────────────────┘
+```
+
+Standard IDE. Full screen. No agent pane visible. The MCP server is still running — agents CAN connect and operate, but there's no visible agent UI. In this mode, the agent powers subtle augmentation: inline suggestions, completions, background diagnostics enrichment. The developer is driving.
+
+### Mode 2: Agent + IDE (toggle with `Ctrl+L`)
+
+```
+┌──────────────────────────────────────────────────┐
+│ Tabs                                             │
+├───────────┬──────────────────────────┬───────────┤
+│           │                          │           │
+│   File    │       Editor             │   Agent   │
+│   Tree    │                          │   Pane    │
+│           │   [shows diffs,          │  (Claude  │
+│           │    replacements,         │   Code /  │
+│           │    breakpoints,          │  OpenCode │
+│           │    test results          │   etc.)   │
+│           │    in real time]         │           │
+├───────────┴──────────────────────────┴───────────┤
+│ Status Bar                                       │
+└──────────────────────────────────────────────────┘
+```
+
+The agent pane is a real tmux pane running Claude Code, OpenCode, or any CLI agent.
+
+Key behaviors:
+- `Ctrl+L` toggles the agent pane open/closed
+- The agent pane is a real terminal — the user can type in it, interact with the agent directly
+- The agent pane auto-spawns the user's configured agent (e.g., `claude` CLI) or opens as a blank terminal
+- Agent pane position defaults to right, configurable to left/bottom
+- If an agent triggers a visual IDE action while in IDE-only mode, Oxide shows a non-intrusive notification but does NOT force-open the agent pane
 
 ## Tech Stack
 
@@ -149,6 +313,8 @@ The LLM agent and VSCode extensions communicate over the same message protocol. 
 | Git | gitoxide (gix) | latest |
 | Extension IPC | JSON-RPC 2.0 (custom impl) | — |
 | LLM protocol | MCP-compatible | — |
+| MCP server | MCP over HTTP+SSE (custom impl) | — |
+| HTTP server | axum | latest |
 
 ## Workspace Structure
 
@@ -222,13 +388,14 @@ oxide/
 │   │       ├── shim.rs        # Rust-side API shim (maps vscode.* calls to TUI)
 │   │       └── registry.rs    # Extension discovery and loading
 │   │
-│   ├── oxide-toolbox/         # IDE Toolbox Protocol (LLM tool interface)
+│   ├── oxide-toolbox/         # IDE Toolbox Protocol (MCP server)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── protocol.rs    # MCP-compatible tool definitions
-│   │       ├── server.rs      # Tool server that LLM agents connect to
-│   │       └── handlers.rs    # Tool invocation handlers
+│   │       ├── server.rs      # HTTP+SSE server on localhost:4322
+│   │       ├── handlers.rs    # Tool invocation handlers
+│   │       └── events.rs      # SSE event stream (diagnostics, state changes)
 │   │
 │   └── oxide-config/          # Configuration and settings
 │       ├── Cargo.toml
@@ -280,6 +447,8 @@ oxide/
 - **Extension host communication is always async and never blocks the TUI thread.**
 - **Every IDE primitive that exists in the TUI must also be exposed in the IDE Toolbox Protocol.** If a human can do it, an LLM agent should be able to do it programmatically.
 - **Keybindings are data, not code.** All keybindings are defined in a keymap data structure that can be swapped at runtime. Never hardcode a shortcut in a widget.
+- **MCP server is default-on.** Starts with Oxide, binds to localhost:4322. No opt-in friction.
+- **Core is agent-agnostic.** No Claude-specific, no OpenCode-specific code in core. MCP protocol is the only interface.
 
 ## Build and Run
 
@@ -313,11 +482,12 @@ Priority order:
 3. Editor core: rope buffer, cursor, basic editing (type, delete, select, copy/paste, undo/redo)
 4. Mouse support: click to position cursor, drag to select, scroll
 5. File tree: read directory, click to open file in editor
-6. Syntax highlighting: tree-sitter integration
-7. Command palette: Ctrl+Shift+P fuzzy finder
-8. LSP integration: start language server, show completions and diagnostics
-9. Extension host: spawn Node.js process, basic IPC, run a simple extension
-10. LLM agent pane: text chat panel with file context
+6. Tmux session management: Oxide launches inside a tmux session it controls. `Ctrl+L` splits a pane for the agent CLI. Oxide manages pane creation/destruction/resizing programmatically.
+7. Syntax highlighting: tree-sitter integration
+8. Command palette: Ctrl+Shift+P fuzzy finder
+9. LSP integration: start language server, show completions and diagnostics
+10. MCP server on localhost:4322: expose Phase 1 tool surface (8 tools). Ship `.mcp.json` snippet in README.
+11. Extension host: spawn Node.js process, basic IPC, run a simple extension
 
 ## What NOT to Build (Yet)
 
@@ -325,7 +495,9 @@ Priority order:
 - No git panel (Phase 2)
 - No diff viewer (Phase 2)
 - No test runner (Phase 2)
-- No IDE Toolbox Protocol (Phase 2)
+- No embedded LLM chat pane (agents connect externally via MCP)
+- No auth on MCP server (localhost-only, not needed)
+- No IDE→agent events / SSE notifications (Phase 2)
 - No multi-user / collaboration (Phase 4)
 - No enterprise features (Phase 4)
 - No settings UI (use config file for now)
@@ -349,6 +521,10 @@ Priority order:
 | LLM protocol | MCP | Standard for tool use, agent-agnostic |
 | Default keybindings | IntelliJ/VSCode style | Familiar to 50M+ developers |
 | Modal editing | Optional, not default | Building for the masses |
+| MCP transport | HTTP+SSE on localhost:4322 | Cross-platform, debuggable, MCP-native |
+| HTTP server | axum | Best Rust HTTP framework, tokio-native |
+| Tmux | Invisible infrastructure layer | Battle-tested PTY/pane management, ubiquitous |
+| LLM integration | MCP server, no bundled LLM | Agent-agnostic, works with any MCP client |
 
 ## Founder Context
 
