@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 90">
+  <!-- Background -->
+  <rect width="400" height="90" rx="10" fill="#0f172a"/>
+
+  <!-- Text cursor (blue accent) -->
+  <rect x="25" y="14" width="3" height="58" rx="1.5" fill="#3b82f6"/>
+
+  <!-- OXIDE (bright white) -->
+  <text x="36" y="66" fill="#f8fafc" font-family="sans-serif" font-size="62" font-weight="900" letter-spacing="2">OXIDE</text>
+
+  <!-- Fe₂O₃ — iron in rust-orange, oxygen in blue -->
+  <text x="290" y="45" fill="#d45a3a" font-family="sans-serif" font-size="20" font-weight="400">Fe</text>
+  <text x="313" y="52" fill="#d45a3a" font-family="sans-serif" font-size="14" font-weight="400">2</text>
+  <text x="323" y="45" fill="#3b82f6" font-family="sans-serif" font-size="20" font-weight="400">O</text>
+  <text x="339" y="52" fill="#3b82f6" font-family="sans-serif" font-size="14" font-weight="400">3</text>
+</svg>

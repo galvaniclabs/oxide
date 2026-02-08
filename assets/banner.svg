@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420">
+  <!-- Outer background -->
+  <rect width="880" height="420" rx="16" fill="#0a0f1a"/>
+
+  <!-- Window shadow -->
+  <rect x="48" y="23" width="800" height="390" rx="10" fill="#000" opacity="0.4"/>
+
+  <!-- Terminal window -->
+  <rect x="40" y="15" width="800" height="390" rx="10" fill="#0f172a"/>
+
+  <!-- Title bar -->
+  <rect x="41" y="16" width="798" height="41" rx="9" fill="#1a2234"/>
+  <rect x="41" y="36" width="798" height="21" fill="#1a2234"/>
+  <line x1="41" y1="57" x2="839" y2="57" stroke="#0d1220" stroke-width="1"/>
+
+  <!-- Traffic lights -->
+  <circle cx="68" cy="36" r="7" fill="#ff5f57"/>
+  <circle cx="90" cy="36" r="7" fill="#febc2e"/>
+  <circle cx="112" cy="36" r="7" fill="#28c840"/>
+
+  <!-- Title text -->
+  <text x="440" y="42" text-anchor="middle" fill="#64748b" font-family="monospace" font-size="13">oxide — ~/projects/myapp</text>
+
+  <!-- ═══════ Content ═══════ -->
+
+  <!-- Text cursor line (blue accent) -->
+  <rect x="78" y="97" width="3" height="56" rx="1.5" fill="#3b82f6"/>
+
+  <!-- OXIDE (bright white) -->
+  <text x="90" y="150" fill="#f8fafc" font-family="sans-serif" font-size="72" font-weight="900" letter-spacing="3">OXIDE</text>
+
+  <!-- Fe₂O₃ — iron in rust-orange, oxygen in blue -->
+  <text x="375" y="122" fill="#d45a3a" font-family="sans-serif" font-size="24" font-weight="400">Fe</text>
+  <text x="401" y="131" fill="#d45a3a" font-family="sans-serif" font-size="16" font-weight="400">2</text>
+  <text x="413" y="122" fill="#3b82f6" font-family="sans-serif" font-size="24" font-weight="400">O</text>
+  <text x="432" y="131" fill="#3b82f6" font-family="sans-serif" font-size="16" font-weight="400">3</text>
+
+  <!-- Tagline -->
+  <text x="82" y="198" fill="#64748b" font-family="monospace" font-size="18">A modern IDE that runs in your terminal.</text>
+
+  <!-- ═══════ Feature Badges ═══════ -->
+
+  <!-- rust -->
+  <rect x="82" y="222" width="60" height="30" rx="5" fill="none" stroke="#d45a3a" stroke-width="1.5"/>
+  <text x="112" y="242" text-anchor="middle" fill="#d45a3a" font-family="monospace" font-size="13">rust</text>
+
+  <!-- vscode extensions -->
+  <rect x="156" y="222" width="170" height="30" rx="5" fill="none" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="241" y="242" text-anchor="middle" fill="#3b82f6" font-family="monospace" font-size="13">vscode extensions</text>
+
+  <!-- llm native -->
+  <rect x="340" y="222" width="112" height="30" rx="5" fill="none" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="396" y="242" text-anchor="middle" fill="#22c55e" font-family="monospace" font-size="13">llm native</text>
+
+  <!-- no modal -->
+  <rect x="466" y="222" width="92" height="30" rx="5" fill="none" stroke="#eab308" stroke-width="1.5"/>
+  <text x="512" y="242" text-anchor="middle" fill="#eab308" font-family="monospace" font-size="13">no modal</text>
+
+  <!-- ═══════ Bottom Prompt ═══════ -->
+
+  <text x="82" y="372" fill="#22c55e" font-family="monospace" font-size="20" font-weight="bold">›</text>
+  <text x="106" y="372" fill="#e2e8f0" font-family="monospace" font-size="20">oxide .</text>
+  <rect x="192" y="356" width="12" height="22" rx="2" fill="#3b82f6" opacity="0.85"/>
+</svg>
