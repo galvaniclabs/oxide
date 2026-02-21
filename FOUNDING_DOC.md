@@ -37,6 +37,7 @@ Oxide is a full-featured IDE that runs in your terminal with:
 - **Modern, familiar UX by default** — normal text editing (not modal), IntelliJ/VSCode keybindings, full mouse support, click-to-edit, Ctrl+C/V, Ctrl+Z. No modes. No wall of keybindings to memorize.
 - **VSCode extension compatibility** — run the extensions you already use. Language support, debuggers, linters, formatters, themes — they just work.
 - **LLM as a first-class IDE citizen** — not a chat sidebar. The IDE's own primitives (debugger, diff viewer, git, test runner) are exposed as tools that LLM agents can invoke and observe. The boundary between "human using IDE" and "LLM using IDE" disappears.
+- **Provenance for every line of code** — Oxide tracks who wrote every line (human or agent), how (keystroke, MCP tool call, terminal command), and why (the diagnostic, the prompt, the test failure). `oxide blame` is `git blame` for the age of AI. Provenance travels with git, is visible in PRs, and gives enterprises the audit trail they need to scale agents with confidence.
 - **Zero config** — open a project, everything works. Language detection, syntax highlighting, git integration, LLM agent. No Lua files. No dotfile ritual.
 - **Fast AF** — written in Rust. Starts in milliseconds. Handles million-line files. Renders at terminal refresh rate.
 
@@ -76,6 +77,9 @@ Oxide does NOT bundle an LLM. It does NOT compete with Claude Code, OpenCode, or
 
 ### 7. Oxide Is the Single Pane of Glass
 The developer never leaves Oxide to interact with their AI agent. Agents run inside Oxide (via tmux-managed panes) and connect to the IDE via MCP on localhost. Editor, file tree, agent terminal — one window, shared state, no tmux tab switching, no alt-tabbing.
+
+### 8. One Language for Humans and Agents — With Full Provenance
+Oxide speaks the same language to both sides. A `replaceRange` is a `replaceRange` whether a human triggered it via keystrokes or an agent triggered it via MCP. Because both operate through the same primitives on the same state, Oxide can track **who** changed every line, **how** (keystroke, MCP tool call, terminal command), and **why** (the diagnostic, the prompt, the test failure that triggered it). This provenance is captured in a session journal, embedded in git history at commit time, and shared across the team. It's `git blame` for the age of AI-assisted development.
 
 ---
 
@@ -240,6 +244,76 @@ The IDE is the visual feedback layer for agent actions. The agent's terminal sho
 - Agent → IDE (via MCP tools): Agent calls tools, IDE state changes, TUI renders the effect.
 - IDE → Agent (via MCP notifications/events): SSE events for developer actions (file opened, cursor moved, diagnostic changed). Phase 2 — requires careful design around event noise.
 
+**Provenance Tracking: `oxide blame`**
+
+Oxide sits at the intersection of every code change — human and agent alike. Because both operate through the same IDE primitives, Oxide can capture a complete provenance record for every line of code: who wrote it, how, and why.
+
+Three data streams feed the provenance system:
+
+1. **MCP tool calls** (agent → IDE, structured) — every `replaceRange`, `goToLine`, `diagnostics.list` the agent invokes
+2. **Terminal activity** (agent's shell) — Oxide owns the agent's tmux pane and observes commands and output via `pipe-pane` / `capture-pane`. When an agent runs `cargo test`, `git diff`, or `curl`, Oxide sees it.
+3. **Human IDE actions** (keystrokes, clicks, navigation) — every edit, cursor movement, undo/redo, file open
+
+All three streams feed into a **session journal** — an append-only, timestamped log of every action, tagged with actor (human or agent:name) and mechanism (keystroke, MCP call, terminal command).
+
+Example session journal:
+```
+14:30:02  agent:claude  mcp     ide.diagnostics.list()           → 4 errors
+14:30:03  agent:claude  mcp     ide.editor.getContent(auth.rs)   → read 120 lines
+14:30:05  agent:claude  mcp     ide.editor.replaceRange(auth.rs, 42, 48, ...)
+14:30:06  agent:claude  term    cargo test auth                  → exit 0
+14:30:10  human:alice   edit    auth.rs:78-80                    → manual rewrite
+14:30:15  human:alice   undo    auth.rs:42-48                    → reverted agent edit
+14:30:18  human:alice   edit    auth.rs:42-45                    → manual rewrite
+```
+
+At commit time, Oxide correlates journal entries to the files being committed and writes a structured trace file:
+
+```
+.oxide/
+  traces/
+    <commit-sha>.jsonl     # provenance trace for this commit
+```
+
+These trace files are **checked into the repo** and travel with git. When someone pulls, they get the full provenance for every commit. A reviewer opening a PR sees not just the diff, but the reasoning chain behind each change.
+
+The commit itself carries lightweight metadata:
+```
+fix(auth): handle expired token refresh
+
+Oxide-Agent: claude-code
+Oxide-Authored: human=35% agent=65%
+Oxide-Segments: seg_01HX, seg_01HY
+```
+
+This is `git blame` enriched with provenance. `oxide blame auth.rs` walks the same commit history but joins each line against its trace data:
+
+```
+abc123 (alice, human, keystroke)                          fn auth() {
+abc123 (agent:claude, mcp:replaceRange,                     let token = get_token().await?;
+        trigger:diagnostic:E0308, accepted-by:alice)
+def456 (bob, human, keystroke)                              if token.is_expired() {
+```
+
+Every line has an **actor**, a **mechanism**, and a **context chain**. For enterprises, this answers questions that no other tool can:
+
+- "What percentage of this codebase was agent-authored?"
+- "Was this agent-generated change reviewed by a human?"
+- "What was the agent's reasoning when it wrote this code?"
+- "In this autonomous run, what did the agent try before arriving at the final change?"
+
+**Storage model:**
+
+| Store | What | Who sees it | Lifetime |
+|-------|------|------------|----------|
+| Runtime journal (in-memory) | Every action during the session | Oxide process | Session lifetime |
+| Local sidecar (`~/.oxide/history/`) | All actions including failed attempts and reverts | The developer | Configurable retention |
+| In-repo (`.oxide/traces/`) | Provenance for shipped commits | The team (via git) | Forever (in git history) |
+
+The local sidecar captures everything — including work that was reverted, abandoned, or never committed. The in-repo traces are the curated subset: provenance for code that actually shipped. Both are valuable, but the in-repo traces are what enable team-wide visibility and PR review integration.
+
+**Terminal observation** is critical to completeness. Agents don't do everything through MCP — they also run shell commands (`cargo test`, `git diff`, `mkdir`, `curl`). If we only captured MCP tool calls, we'd have a partial picture. Because Oxide owns the tmux pane the agent runs in, we can tap the PTY stream and capture the full picture: what the agent tried in the terminal, what output it saw, and how that informed its next MCP call.
+
 ---
 
 ## Two-Mode UX Model
@@ -318,7 +392,7 @@ Oxide ships with IntelliJ/VSCode-compatible keybindings. No modes. No leader key
 ## Phased Roadmap
 
 ### Phase 1: Foundation (Months 1-4)
-**Goal:** Usable editor with LSP + basic extension support
+**Goal:** Usable editor with LSP + basic extension support + provenance tracking
 
 - [ ] Custom editor core in Rust (tree-sitter, rope, basic editing)
 - [ ] ratatui-based TUI shell (file tree, tabs, status bar, command palette)
@@ -329,8 +403,12 @@ Oxide ships with IntelliJ/VSCode-compatible keybindings. No modes. No leader key
 - [ ] MCP server on localhost:4322 (expose 8 Phase 1 tools, ship `.mcp.json` snippet)
 - [ ] Node.js extension host with Tier 1 API shim
 - [ ] Git status in status bar
+- [ ] Session journal — line-level provenance tracking for every edit (human keystroke vs agent MCP call), stored in buffer metadata
+- [ ] Terminal observer — tap agent tmux pane to capture shell commands and output
+- [ ] Trace writer — at commit time, write `.oxide/traces/<sha>.jsonl` with provenance for committed changes
+- [ ] `oxide blame` CLI — enriched blame showing actor, mechanism, and context per line
 
-**Ship it.** Even at this stage, it's the only terminal IDE with modern UX + extension support + MCP server for any LLM agent.
+**Ship it.** Even at this stage, it's the only terminal IDE with modern UX + extension support + MCP server for any LLM agent + provenance tracking for every line of code.
 
 ### Phase 2: IDE Power (Months 5-8)
 **Goal:** Full IDE feature parity
@@ -370,6 +448,7 @@ Oxide ships with IntelliJ/VSCode-compatible keybindings. No modes. No leader key
 - [ ] Team configuration sharing (rules files, prompt templates)
 - [ ] Extension allowlist/blocklist for enterprise
 - [ ] Tier 2 extension support (webview adapters)
+- [ ] Provenance analytics dashboard — team-wide stats on agent vs human authorship, review rates, autonomous run audit trails
 
 ---
 
@@ -402,10 +481,10 @@ Oxide ships with IntelliJ/VSCode-compatible keybindings. No modes. No leader key
 - All keymaps
 - Extension support
 - Single-user LLM integration
+- Local provenance tracking — session journal, `oxide blame`, `.oxide/traces/` in git
 - Community support
 
 ### Oxide Pro ($15/user/month)
-- Priority LLM model access / hosted agent
 - Cloud sync (settings, keymaps, extensions)
 - Advanced AI features (codebase-wide refactoring, test generation)
 - Priority support
@@ -413,7 +492,7 @@ Oxide ships with IntelliJ/VSCode-compatible keybindings. No modes. No leader key
 ### Oxide Enterprise ($40/user/month)
 - Everything in Pro
 - SSO / SAML / OIDC
-- Audit logging
+- Provenance analytics — team-wide dashboards for agent vs human authorship, autonomous run audit trails, review compliance reporting
 - Air-gapped deployment
 - Extension allowlist/blocklist
 - Multi-user collaboration
@@ -426,9 +505,10 @@ Oxide ships with IntelliJ/VSCode-compatible keybindings. No modes. No leader key
 
 1. **VSCode extension compatibility in a terminal** — nobody else has this
 2. **IDE Toolbox Protocol** — the standard for how LLMs interact with development environments
-3. **Modern UX without modal editing** — captures the 90% of developers that terminal tools ignore
-4. **Rust performance** — genuinely faster than Electron-based IDEs
-5. **Founder's Neovim internals expertise** — deep understanding of terminal editor architecture at the systems level
+3. **Provenance tracking (`oxide blame`)** — line-level attribution of who wrote every line (human or agent), how, and why. No other tool can answer "what percentage of this codebase was agent-authored?" or "was this agent-generated code reviewed by a human?" This is the enterprise unlock — compliance, audit trails, and confidence to scale autonomous agents
+4. **Modern UX without modal editing** — captures the 90% of developers that terminal tools ignore
+5. **Rust performance** — genuinely faster than Electron-based IDEs
+6. **Founder's Neovim internals expertise** — deep understanding of terminal editor architecture at the systems level
 
 ---
 

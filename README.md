@@ -18,6 +18,8 @@
 
 Oxide is a terminal-native IDE built in Rust. It combines the speed and composability of the terminal with the UX of a modern editor — familiar keybindings, full mouse support, VSCode extension compatibility, and an MCP server that gives any LLM agent eyes and hands inside your IDE.
 
+Oxide speaks the same language to humans and agents. Because both operate through the same IDE primitives, Oxide tracks who wrote every line of code — human or agent — and why. `oxide blame` is `git blame` for the age of AI.
+
 No modal editing. No config files. No bundled AI. It just works — and so does your agent.
 
 ## Why
@@ -26,11 +28,12 @@ Developers are increasingly living in the terminal — SSH sessions, Claude Code
 
 Meanwhile, LLM coding agents can read and write your files, but they can't set a breakpoint, inspect a variable, view a diff, or run your tests. They're powerful but blind to the IDE.
 
-Oxide fixes both problems:
+Oxide fixes both problems — and adds something nobody else has:
 
 - **For developers:** A real IDE in the terminal with the keybindings you already know
 - **For LLM agents:** An MCP server on localhost that exposes every IDE primitive — editors, diagnostics, symbols, files — as tools any agent can call
 - **For the workflow:** One window. Your editor on the left, your agent on the right. Shared state. The agent fixes code and you see the diff appear in real time
+- **For the team:** Every code change has provenance — who wrote it (human or agent), how, and why. It travels with git, shows up in PRs, and gives you confidence to scale autonomous agents
 
 ## Principles
 
@@ -39,6 +42,8 @@ Oxide fixes both problems:
 **We don't own the AI — we make the IDE legible to any AI.** Oxide does NOT bundle an LLM. It runs an MCP server that any agent (Claude Code, OpenCode, Aider) connects to. The agent runs in its own process; Oxide gives it eyes and hands inside the IDE.
 
 **Oxide is the single pane of glass.** Your editor, file tree, and agent terminal live in one window. `Ctrl+L` opens a real terminal pane running your agent of choice. The agent calls MCP tools, and you see the results render in the editor in real time. No alt-tabbing.
+
+**One language for humans and agents — with full provenance.** Oxide speaks the same language to both sides. Every edit — whether from a keystroke or an MCP tool call — flows through the same primitives. So Oxide can track who wrote every line, how, and why. That provenance is captured in a session journal, embedded in git at commit time, and shared across the team via `.oxide/traces/`.
 
 **Extensions are the ecosystem.** Oxide runs VSCode extensions via a compatible extension host. We don't rewrite language support for 50 languages — we run the extensions that already do it.
 
@@ -59,6 +64,24 @@ Oxide fixes both problems:
 **Editor core.** Custom-built in Rust. Tree-sitter for syntax highlighting, rope data structure for efficient editing, LSP for intellisense.
 
 **Extension Host.** Separate Node.js process running a VSCode API compatibility shim. Extensions think they're running in VSCode. Communication via JSON-RPC over Unix domain sockets.
+
+## Provenance: `oxide blame`
+
+Oxide tracks the provenance of every line of code. Because both human and agent edits flow through the same IDE primitives, Oxide knows:
+
+- **Who** — human (`alice`) or agent (`agent:claude-code`)
+- **How** — keystroke, MCP tool call (`ide.editor.replaceRange`), or terminal command
+- **Why** — the diagnostic, prompt, or test failure that triggered the change
+
+Run `oxide blame` to see enriched attribution:
+
+```
+abc123 (alice, human, keystroke)                              fn auth() {
+abc123 (agent:claude, mcp:replaceRange, diagnostic:E0308)       let token = get_token().await?;
+def456 (bob, human, keystroke)                                  if token.is_expired() {
+```
+
+Provenance is stored in `.oxide/traces/` and travels with git. Reviewers see it in PRs. Enterprises can answer: "What percentage of this codebase was agent-authored?" and "Was every agent change reviewed by a human?"
 
 ## Connect Your Agent
 
@@ -110,7 +133,7 @@ Optional keymaps: Vim, Helix, Emacs, Sublime, IntelliJ
 
 ## Roadmap
 
-- [ ] **Phase 1 — Foundation:** Editor core, TUI shell, standard keybindings, mouse, file tree, tmux agent pane (`Ctrl+L`), syntax highlighting, LSP, MCP server (8 tools on localhost:4322), extension host
+- [ ] **Phase 1 — Foundation:** Editor core, TUI shell, standard keybindings, mouse, file tree, tmux agent pane (`Ctrl+L`), syntax highlighting, LSP, MCP server (8 tools on localhost:4322), extension host, provenance tracking (`oxide blame`, `.oxide/traces/`)
 - [ ] **Phase 2 — IDE Power:** DAP debugging, diff viewer, git panel, test runner, full MCP tool schema, IDE-to-agent SSE events, inline diff accept/reject, embedded chat pane, multi-cursor
 - [ ] **Phase 3 — LLM Deep Integration:** Agent-invocable debugger/diff/git/tests, inline suggestions, bidirectional context awareness
 - [ ] **Phase 4 — Enterprise:** Client/server architecture, multi-user sessions, SSO, audit logging, air-gapped deployment
@@ -141,6 +164,7 @@ Areas where help is most valuable right now:
 - **Editor core** — text buffer, cursor management, selection, undo/redo
 - **TUI layout** — ratatui-based windowing, panels, command palette
 - **MCP server** — axum-based HTTP+SSE server, tool handler implementation
+- **Provenance tracking** — session journal, terminal observer, trace writer, `oxide blame`
 - **Tmux integration** — programmatic session/pane management, agent pane lifecycle
 - **Tree-sitter integration** — syntax highlighting, code folding
 - **VSCode API research** — mapping which API surfaces the top extensions use
