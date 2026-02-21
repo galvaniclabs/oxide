@@ -1,0 +1,21 @@
+[package]
+name = "oxide-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Editor core: buffer, cursor, selection, undo/redo"
+
+# Phase 1: deps declared ahead of use — machete will flag them until code lands
+[package.metadata.cargo-machete]
+ignored = ["ropey", "serde", "thiserror", "tracing"]
+
+[dependencies]
+ropey = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

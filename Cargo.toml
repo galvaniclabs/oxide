@@ -1,0 +1,130 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/oxide-core",
+    # Uncomment as crates are created:
+    # "crates/oxide-tui",
+    # "crates/oxide-lsp",
+    # "crates/oxide-dap",
+    # "crates/oxide-git",
+    # "crates/oxide-extensions",
+    # "crates/oxide-toolbox",
+    # "crates/oxide-config",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/galvaniclabs/oxide"
+rust-version = "1.85.0"
+
+# ── Shared dependencies ─────────────────────────────────────────────
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Editor core
+ropey = "1"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Syntax highlighting
+tree-sitter = "0.24"
+
+# HTTP server (MCP)
+axum = "0.8"
+
+# Git
+gix = { version = "0.70", default-features = false }
+
+# ── Workspace-wide lints ────────────────────────────────────────────
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+# Pedantic as baseline
+pedantic = { level = "warn", priority = -1 }
+
+# Hard denials — these are bugs
+correctness = { level = "deny", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+# Warn on panic-prone patterns
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+# Allow patterns common in editor/TUI code
+type_complexity = "allow"
+too_many_arguments = "allow"
+large_enum_variant = "allow"
+module_name_repetitions = "allow"
+module_inception = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+
+# ── Binary ──────────────────────────────────────────────────────────
+[package]
+name = "oxide"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Phase 1: deps declared ahead of use — machete will flag them until code lands
+[package.metadata.cargo-machete]
+ignored = ["oxide-core"]
+
+[dependencies]
+oxide-core = { path = "crates/oxide-core", version = "0.1.0" }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true
+
+# ── Build profiles ──────────────────────────────────────────────────
+[profile.dev]
+incremental = true
+
+[profile.dev.build-override]
+opt-level = 0
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+# Fast release for local testing (skip LTO)
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+strip = false
+debug = "limited"

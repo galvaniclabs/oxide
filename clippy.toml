@@ -1,0 +1,4 @@
+msrv = "1.85.0"
+disallowed-names = ["foo", "bar", "baz", "temp", "tmp"]
+avoid-breaking-exported-api = true
+cognitive-complexity-threshold = 30
