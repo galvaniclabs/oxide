@@ -326,6 +326,8 @@ oxide/
 ├── CLAUDE.md                  # This file
 ├── README.md                  # Public README
 ├── FOUNDING_DOC.md            # Full vision document
+├── OXIDE_BLAME.md             # Provenance tracking & blame architecture
+├── AGENT_IDE_PROTOCOL.md      # Agent-IDE communication protocol
 ├── LICENSE                    # Apache 2.0
 │
 ├── crates/
@@ -487,7 +489,8 @@ Priority order:
 8. Command palette: Ctrl+Shift+P fuzzy finder
 9. LSP integration: start language server, show completions and diagnostics
 10. MCP server on localhost:4322: expose Phase 1 tool surface (8 tools). Ship `.mcp.json` snippet in README.
-11. Extension host: spawn Node.js process, basic IPC, run a simple extension
+11. Provenance tracking: session journal, blame index, trace files, `oxide blame`. See [OXIDE_BLAME.md](OXIDE_BLAME.md) for full architecture.
+12. Extension host: spawn Node.js process, basic IPC, run a simple extension
 
 ## What NOT to Build (Yet)
 
