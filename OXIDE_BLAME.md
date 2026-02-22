@@ -288,6 +288,46 @@ Editing session:
   oxide blame <file> (walk traces + git blame fallback)
 ```
 
+## Agent session detection
+
+Oxide needs to know when an agent session starts and ends to properly scope journal entries and blame attribution.
+
+**Primary signal: MCP connection lifecycle**
+
+When an agent connects to the MCP server on localhost:4322 and calls `initialize` / tool discovery, that's a session start. When the connection drops (SSE stream closes, HTTP keepalive times out), that's session end. This is clean, protocol-level, and works for any MCP client — no agent-specific code.
+
+```
+Agent connects → MCP initialize → session_id assigned → journal entries tagged with session
+Agent disconnects → session ends → journal entries for that session are closed
+```
+
+**Fallback signal: tmux pane lifecycle**
+
+When the agent pane is spawned (process starts in tmux), that's a weaker session start signal. Less precise — the agent might not use MCP immediately, or the user might be typing in the agent pane before the agent responds. But it catches the case where an agent is running but hasn't connected via MCP yet.
+
+MCP connection is the authoritative signal. Tmux lifecycle is the fallback.
+
+## Competitive context: Entire (entireio/cli)
+
+Entire is a Go CLI that hooks into Claude Code / Gemini / OpenCode to capture agent sessions as git checkpoints. It validates that teams want agent provenance. Key architectural differences:
+
+**Why Oxide blame doesn't need what Entire builds:**
+
+- **Session rewind**: Entire's core feature is checkpoint-based rewind (restore working tree to a previous agent turn). This is unnecessary in Oxide — git handles rewind (`git stash`, `git reset`), agents have their own undo (Claude Code `/undo`), and the IDE has native undo/redo. Entire needs rewind because it's external and can't control the editor. We *are* the editor.
+
+- **Transcript parsing**: Entire parses agent-specific transcript formats (Claude JSONL, Gemini JSON, OpenCode plugin output) to reconstruct what happened. Oxide captures the full agent terminal via `tmux pipe-pane`/`capture-pane` — agent-agnostic, no format-specific parsers to maintain.
+
+- **Agent-specific hook adapters**: Entire maintains separate hook implementations for each agent (Claude hooks, Gemini hooks, OpenCode plugin). Oxide uses MCP — any agent that speaks MCP gets provenance tracking for free. Zero agent-specific code.
+
+**The fundamental difference:**
+
+Entire reconstructs provenance from outside the IDE by observing transcripts after the fact. Oxide records provenance from inside — every edit flows through our buffer, attribution is captured at the source. Entire is a security camera watching the building. Oxide is the building knowing who opened every door.
+
+**What Entire validates for us:**
+
+- Teams want attribution percentages on commits (`human:35%,agent:65%`) — we already have this in our commit trailers design.
+- The market for agent provenance is real and enterprises are willing to adopt tooling for audit trails.
+
 ## Open questions
 
 1. **Blame index colocation**: Should blame metadata live on the rope (ropey leaf chunks) or as a separate parallel structure? Colocation is elegant but couples blame to the buffer implementation.
